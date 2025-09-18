@@ -38,6 +38,23 @@ templates = Jinja2Templates(directory="templates")
 api_router = APIRouter()
 
 
+@api_router.get("/", response_class=HTMLResponse)
+async def root():
+    """Root endpoint for Railway compatibility"""
+    return """
+    <html>
+        <head>
+            <title>Powercast API</title>
+        </head>
+        <body>
+            <h1>Powercast API</h1>
+            <p>Power Consumption Forecasting API using AttentionLSTM</p>
+            <p>Status: <a href="/health">Health Check</a> | <a href="/ready">Readiness</a> | <a href="/docs">API Docs</a></p>
+        </body>
+    </html>
+    """
+
+
 @api_router.get("/health", response_model=HealthResponse)
 async def health_endpoint():
     """Health check endpoint"""
