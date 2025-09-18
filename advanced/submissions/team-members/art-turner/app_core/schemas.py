@@ -1,6 +1,6 @@
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
 class PredictionRequest(BaseModel):
@@ -22,6 +22,8 @@ class PredictionRequest(BaseModel):
 
 class PredictionResponse(BaseModel):
     """Response model for predictions"""
+    model_config = ConfigDict(protected_namespaces=())
+
     predictions: List[float] = Field(..., description="Predicted power consumption for 3 zones")
     zone_predictions: Dict[str, float] = Field(..., description="Named zone predictions")
     model_info: Dict[str, Any] = Field(..., description="Model metadata")
@@ -36,6 +38,8 @@ class PredictionResponse(BaseModel):
 
 class ModelInfo(BaseModel):
     """Model information response"""
+    model_config = ConfigDict(protected_namespaces=())
+
     model_type: str
     architecture: str
     input_features: int
@@ -48,6 +52,8 @@ class ModelInfo(BaseModel):
 
 class HealthResponse(BaseModel):
     """Health check response"""
+    model_config = ConfigDict(protected_namespaces=())
+
     status: str
     model_loaded: bool
     timestamp: str
