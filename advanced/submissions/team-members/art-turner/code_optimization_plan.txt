@@ -1,0 +1,235 @@
+Code optimization plan
+
+> Goals
+
+  - Reduce image size and cold starts, make health checks reliable, and ensure $PORT binding for Railway.
+  - Decouple runtime from heavy training artifacts; control expensive operations via env flags.
+  - Improve maintainability by modularizing app.py and centralizing config.
+  - Add readiness/liveness, better logging, security hardening, and test coverage.
+  - Keep UI flexible for future redesigns without blocking API evolution.
+
+  Pre-flight
+
+  - Branch off: git checkout -b chore/optimize-deploy-railway.
+  - Ensure local Docker works: docker --version, docker compose version.
+
+  1) Dockerfile Hardening
+
+  - Replace the CMD to honor $PORT and make worker count configurable:
+      - Current: CMD ["gunicorn", "app:app", ..., "--bind", "0.0.0.0:8000", ...]
+      - Change to: CMD ["sh","-c","exec gunicorn app:app --workers ${WORKERS:-2} --worker-class
+  uvicorn.workers.UvicornWorker --bind 0.0.0.0:${PORT:-8000} --timeout 120"]
+  - Fix healthcheck without installing curl:
+      - Replace existing HEALTHCHECK with:
+          - HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 CMD python -c "import
+  os,urllib.request,sys; urllib.request.urlopen(f'http://127.0.0.1:{os.environ.get(\"PORT\",\"8000\")}/health');
+  sys.exit(0)" || exit 1"
+  - Remove unnecessary compilers to shrink image:
+      - Delete apt-get install -y gcc g++ unless you hit wheels issues during build.
+  - Prefer wheels and speed up installs:
+      - Keep pip install --no-cache-dir --upgrade pip
+      - Use pip install --no-cache-dir --prefer-binary -r requirements.txt
+  - Optional: set CPU threading envs to keep memory/CPU stable on small instances:
+      - Add: ENV OMP_NUM_THREADS=1 MKL_NUM_THREADS=1
+
+  Acceptance check:
+
+  - docker build -t powercast-api . builds without gcc.
+  - Run: docker run -e PORT=8080 -p 8080:8080 powercast-api → /health returns 200; container shows listening on 8080.
+
+  2) Reduce Docker Context Size
+
+  - Add or tighten .dockerignore to exclude large training artifacts:
+      - Add:
+          - *.npy
+          - *.pth
+          - mlruns/
+          - *.png (already ignored), *.csv (already ignored)
+          - Keep only the single artifact you will use at runtime (choose one: .onnx OR .pth).
+  - Switch from COPY . . to explicit COPY to whitelist runtime files:
+      - Replace with:
+          - COPY requirements.txt ./
+          - COPY app.py advanced_models.py model_loader.py week2_feature_engineering_fixed.py ./
+          - COPY templates ./templates
+          - COPY static ./static
+          - COPY dataset_metadata_fixed.json feature_scaler.pkl target_scaler.pkl ./
+          - If using PyTorch: COPY best_attentionlstm_*.pth ./ (one file)
+          - If using ONNX: COPY model.onnx ./
+  - Verify context:
+      - docker build -t powercast-api . → confirm context size drops (Docker prints “Sending build context”).
+
+  Acceptance check:
+
+  - Image size reduced vs current.
+  - Container still serves /docs and /dashboard.
+
+  3) Startup Behavior Controls
+
+  - Add env flags (default safe for prod):
+      - EVALUATE_ON_STARTUP=false to avoid loading .npy validation files on boot.
+      - USE_ONNX=false initially; switch to true if you adopt ONNX path (see Step 6).
+      - WORKERS to configure gunicorn worker count on Railway.
+      - ALLOWED_ORIGINS comma-separated origins for CORS.
+      - LOG_FORMAT=json|plain to control logging format.
+  - In app.py:
+      - Read envs once at top-level (new config section):
+          - os.getenv("EVALUATE_ON_STARTUP","false").lower() == "true" etc.
+      - In startup_event, call load_model_and_scalers() as-is, then:
+          - Only call compute_validation_metrics() if EVALUATE_ON_STARTUP is true; otherwise skip.
+  - Add readiness state:
+      - Create ready = False global.
+      - In startup_event, set ready = True after model successfully loads.
+      - Add GET /ready returning 200 if ready and model is not None, else 503.
+
+  Acceptance check:
+
+  - Boot logs show skipping validation unless enabled.
+  - /health returns liveness; /ready flips to 200 after startup completes.
+
+  4) Railway Deployment Specifics
+
+  - Use Docker deployment (recommended).
+  - Railway service config:
+      - Set PORT auto (Railway sets it), remove any hardcoded port.
+      - Set env vars: WORKERS=1 or 2 depending on plan size; ALLOWED_ORIGINS=https://your-frontend.app (can be updated
+  later).
+      - Optional: EVALUATE_ON_STARTUP=false on free/shared plans.
+  - Update README with Railway section (distinct from Render):
+      - “Deploy via Docker” steps.
+      - Required env vars and recommended values.
+      - Health checks: liveness /health, readiness /ready.
+
+  Acceptance check:
+
+  - Deploy to Railway; service becomes healthy; logs show bound to $PORT.
+
+  5) Modularize App Structure (Maintainability)
+
+  - Create modules and move code gradually (no behavior change):
+      - app/
+          - main.py (FastAPI create_app and startup)
+          - routes.py (API endpoints)
+          - schemas.py (Pydantic models)
+          - inference.py (model loading, prediction, scaling)
+          - config.py (env parsing and constants)
+          - observability.py (health/ready, logging setup)
+          - simulation.py (dummy time series + state)
+          - visualization.py (Plotly/HTML helpers)
+  - In app/main.py, build app = FastAPI(...), include routers.
+  - Replace gunicorn app:app with gunicorn app.main:app.
+  - Keep endpoints and signatures identical to avoid breaking clients.
+
+  Acceptance check:
+
+  - Local uvicorn app.main:app --reload serves same endpoints.
+  - Imports resolve; unit tests (Step 9) pass.
+
+  6) Optional: ONNX Runtime Path (Shrink, Speed)
+
+  - Add onnxruntime to requirements.txt (or onnxruntime-slim).
+  - In inference.py:
+      - If USE_ONNX=true and model.onnx exists:
+          - Load InferenceSession with CPU EP, prepare input tensor.
+          - Implement a predict(features: np.ndarray) that mirrors PyTorch output shape and uses scalers.
+      - Else fallback to current PyTorch loader.
+  - Adjust .dockerignore/Dockerfile:
+      - If using ONNX, do not copy .pth; only copy model.onnx.
+      - Remove torch from requirements to shrink image (only if fully committed to ONNX).
+  - Validate outputs on a known input against Torch baseline before removing Torch.
+
+  Acceptance check:
+
+  - USE_ONNX=true runs predictions successfully; latency and image size improved.
+  - If removing Torch: image shrinks substantially; cold start is faster.
+
+  7) Security and API Hygiene
+
+  - CORS:
+      - Replace allow_origins=["*"] with parsing ALLOWED_ORIGINS:
+          - Split by comma, strip whitespace; default to [] for strict, or allow localhost in dev.
+  - Input echo:
+      - In PredictionResponse, set input_data=None by default.
+      - Gate echoing input_data behind DEBUG=true or request param echo=false default.
+  - Validation:
+      - Assert exact feature shape using metadata: if arr.shape != (lookback, n_features) return 400 with clear message.
+
+  Acceptance check:
+
+  - CORS only allows configured origins.
+  - /predict returns 400 on malformed shapes; no sensitive echo by default.
+
+  8) Observability and Logging
+
+  - Logging format:
+      - Add LOG_FORMAT=json|plain env; configure logging.Formatter accordingly.
+      - Include request ID and timing via FastAPI middleware.
+  - Metrics:
+      - Optional: integrate prometheus-fastapi-instrumentator:
+          - Add /metrics in non-auth envs or gated by ENABLE_METRICS=true.
+  - Access logs:
+      - Keep Gunicorn --access-logfile - and --log-level info.
+
+  Acceptance check:
+
+  - Logs structured in JSON when enabled; include status codes and latencies.
+  - Metrics endpoint responds if enabled.
+
+  9) Testing
+
+  - Add tests under tests/:
+      - test_health.py → /health 200, /ready 200 after startup.
+      - test_predict_shape.py → wrong shapes get 400, correct shapes get 200.
+      - test_inference_scaling.py → mock scalers; verify scaling paths.
+      - If ONNX: parity test comparing Torch vs ONNX predictions on fixed input within tolerance.
+  - Use pytest with httpx.AsyncClient or starlette.testclient.
+  - Add pytest to dev requirements (or a requirements-dev.txt).
+
+  Acceptance check:
+
+  - pytest -q passes locally and in CI (if present).
+
+  10) Documentation Updates
+
+  - README:
+      - Add Railway section with Docker deploy, env vars, and health paths.
+      - Document feature flags: EVALUATE_ON_STARTUP, USE_ONNX, WORKERS, ALLOWED_ORIGINS, LOG_FORMAT.
+      - Add “Performance tips” (workers, threads, scaling).
+  - Remove Render-specific instructions from the top; move to a “Render (alternative)” subsection if you keep them.
+
+  Acceptance check:
+
+  - README matches actual start commands and endpoints; junior dev can deploy by copy/paste.
+
+  11) UI Future-Proofing
+
+  - Keep templates in templates/ but decouple from server logic:
+      - Route handlers for HTML should call service functions from inference.py, not embed logic.
+      - Serve static assets under /static with caching headers.
+  - Prepare for separate frontend:
+      - Treat API as primary surface; keep /predict request/response stable.
+      - Add CORS origins via env so a SPA can be hosted elsewhere.
+      - Consider versioning: prefix routes with /v1 to allow future contract changes.
+
+  Acceptance check:
+
+
+  - Remove or relocate very large artifacts from repo history if feasible (optional):
+      - .npy, older .pth, large .png. If kept, ensure .dockerignore excludes them.
+  - Ensure .gitignore keeps venvs and build outputs ignored.
+
+  13) Rollout Plan
+
+  - Phase 1: Dockerfile, health, context slimming, env flags, docs. Deploy to Railway (Torch runtime).
+  - Phase 2: Modularization and tests. Deploy; verify no behavior change.
+  - Phase 3 (optional): ONNX path and removal of Torch. Deploy behind USE_ONNX=true flag; validate parity and roll
+  forward.
+
+  Checklist Summary
+
+  - Port binding uses $PORT; healthcheck works without curl.
+  - Image excludes training data; COPY whitelist used.
+  - Startup avoids heavy validation unless enabled.
+  - Readiness endpoint added; logs structured; CORS restricted.
+  - App modularized; tests added; README updated.
+  - Optional ONNX runtime path implemented and gated.
+

@@ -22,10 +22,19 @@ import uvicorn
 from pathlib import Path
 import base64
 from io import BytesIO
+import time
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+import os
+from app_core.config import (
+    EVALUATE_ON_STARTUP,
+    USE_ONNX,
+    DEBUG_MODE,
+    LOG_FORMAT,
+    ALLOWED_ORIGINS,
+    setup_logging,
+    configure_cors,
+)
+logger = setup_logging(__name__)
 
 # Import model classes
 from advanced_models import AttentionLSTM
@@ -40,14 +49,21 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
+# Simple request timing middleware
+@app.middleware("http")
+async def add_timing_and_log(request, call_next):
+    start = time.time()
+    response = await call_next(request)
+    duration_ms = (time.time() - start) * 1000.0
+    try:
+        logger.info(f"{request.method} {request.url.path} -> {response.status_code} in {duration_ms:.1f}ms")
+    except Exception:
+        pass
+    response.headers["X-Process-Time-ms"] = f"{duration_ms:.1f}"
+    return response
+
 # CORS middleware for client UI
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+configure_cors(app)
 
 # Mount static files and templates (only if directory exists)
 import os
@@ -65,6 +81,7 @@ feature_scaler = None
 target_scaler = None
 metadata = None
 model_validation_metrics: Optional[Dict[str, float]] = None
+ready = False
 
 def partial_scale_features(arr: np.ndarray) -> np.ndarray:
     """Apply feature_scaler to matching leading columns only when counts differ.
@@ -225,11 +242,12 @@ def load_model_and_scalers():
         logger.info(f"Expected input shape: (batch_size, {metadata['lookback_window']}, {input_size})")
         logger.info(f"Output shape: (batch_size, {output_size})")
 
-        # Compute validation metrics if validation files are present
-        try:
-            compute_validation_metrics()
-        except Exception as e:
-            logger.warning(f"Validation metrics computation skipped/failed: {e}")
+        # Optionally compute validation metrics on startup (disabled by default)
+        if EVALUATE_ON_STARTUP:
+            try:
+                compute_validation_metrics()
+            except Exception as e:
+                logger.warning(f"Validation metrics computation skipped/failed: {e}")
         
     except Exception as e:
         logger.error(f"Error loading model components: {str(e)}")
@@ -567,7 +585,14 @@ def create_correlation_heatmap(features_array: np.ndarray, feature_names: List[s
 @app.on_event("startup")
 async def startup_event():
     """Initialize the application"""
-    load_model_and_scalers()
+    global ready
+    try:
+        load_model_and_scalers()
+        ready = True
+        logger.info("Startup complete; readiness set to True")
+    except Exception:
+        ready = False
+        raise
 
 def compute_validation_metrics(batch_size: int = 256, max_samples: Optional[int] = None):
     """Evaluate the loaded model on validation data and cache metrics.
@@ -1243,6 +1268,13 @@ async def health_check():
         timestamp=datetime.now().isoformat()
     )
 
+@app.get("/ready")
+async def readiness_check():
+    """Readiness endpoint flips to 200 once model loaded."""
+    if ready and model is not None:
+        return {"status": "ready", "model_loaded": True, "timestamp": datetime.now().isoformat()}
+    raise HTTPException(status_code=503, detail={"status": "starting", "model_loaded": False})
+
 @app.get("/model-info", response_model=ModelInfo)
 async def get_model_info():
     """Get model information and architecture details"""
@@ -1289,7 +1321,7 @@ async def get_model_info():
     )
 
 @app.post("/predict", response_model=PredictionResponse)
-async def predict(request: PredictionRequest):
+async def predict(request: PredictionRequest, echo: bool = False):
     """Make power consumption predictions"""
     if model is None or feature_scaler is None or target_scaler is None:
         raise HTTPException(status_code=503, detail="Model components not loaded")
@@ -1374,8 +1406,8 @@ async def predict(request: PredictionRequest):
                 "api_call_time": datetime.now().strftime("%H:%M:%S")  # Show when API was called (for debugging)
             },
             timestamp=primary_timestamp,  # Use simulation time as primary timestamp
-            input_data=raw_features_array.tolist(),  # Return raw data for display
-            input_summary=input_summary
+            input_data=raw_features_array.tolist() if (DEBUG_MODE or echo) else None,  # optional echo
+            input_summary=input_summary if (DEBUG_MODE or echo) else None
         )
         
     except Exception as e:

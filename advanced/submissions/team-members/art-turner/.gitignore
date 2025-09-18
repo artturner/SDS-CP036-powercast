@@ -1,1 +1,238 @@
-"*.npy" 
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+cover/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# IPython
+profile_default/
+ipython_config.py
+
+# pyenv
+.python-version
+
+# pipenv
+Pipfile.lock
+
+# poetry
+poetry.lock
+
+# pdm
+.pdm.toml
+
+# PEP 582
+__pypackages__/
+
+# Celery stuff
+celerybeat-schedule
+celerybeat.pid
+
+# SageMath parsed files
+*.sage.py
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Spyder project settings
+.spyderproject
+.spyproject
+
+# Rope project settings
+.ropeproject
+
+# mkdocs documentation
+/site
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# pytype static type analyzer
+.pytype/
+
+# Cython debug symbols
+cython_debug/
+
+# PyCharm
+.idea/
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# Operating System
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Model artifacts and data (keep only essential files)
+*.npy
+*.pth
+!best_attentionlstm_*.pth
+*.onnx
+mlruns/
+outputs/
+logs/
+*.log
+
+# Large data files
+*.csv
+*.tsv
+*.json
+!dataset_metadata_fixed.json
+!package*.json
+
+# Image files
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+*.tiff
+*.svg
+
+# Video files
+*.mp4
+*.avi
+*.mov
+*.wmv
+
+# Audio files
+*.mp3
+*.wav
+*.flac
+
+# Archive files
+*.zip
+*.tar.gz
+*.tar.bz2
+*.7z
+*.rar
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+
+# Security files
+*.key
+*.pem
+*.crt
+*.p12
+secrets.txt
+
+# Docker
+.dockerignore
+
+# CI/CD
+.github/workflows/local-*.yml
+
+# IDE specific
+*.sublime-project
+*.sublime-workspace
+
+# Documentation build
+docs/_build/
+docs/site/
+
+# Local configuration
+local_config.py
+config.local.py
+
+# Development notes
+notes.txt
+todo.txt
+scratch.py
+
+# Backup files
+*.bak
+*.backup
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Cache directories
+.cache/
+__pycache__/
+
+# Project specific temporary files
+test_sequences*.npy
+test_targets*.npy
+train_sequences*.npy
+train_targets*.npy
+val_sequences*.npy
+val_targets*.npy
+*-confusion.txt
+*-final.txt
+*training.txt
+*day*.txt
+*week*.txt
+*push.txt
+*report*.md
+!TURNER_REPORT.md 

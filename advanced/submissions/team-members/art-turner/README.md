@@ -5,12 +5,15 @@ A production-ready FastAPI deployment featuring an **AttentionLSTM** model for m
 ## 🚀 Features
 
 - **High-Performance Model**: AttentionLSTM achieving R² = 0.9941
-- **RESTful API**: FastAPI with automatic documentation
-- **Advanced UI**: Interactive dashboard with real-time visualizations  
-- **Docker Support**: Containerized deployment
-- **Cloud Ready**: Configured for Render.com deployment
+- **RESTful API**: FastAPI with automatic documentation and enhanced security
+- **Advanced UI**: Interactive dashboard with real-time visualizations
+- **Docker Support**: Optimized containerized deployment with hardening
+- **Cloud Ready**: Configured for Railway.app and Render.com deployment
 - **Real-time Predictions**: WebSocket-like real-time prediction updates
 - **Comprehensive Testing**: Built-in API testing and validation
+- **Modular Architecture**: Clean separation of concerns with app_core modules
+- **Environment Controls**: Feature flags for startup behavior and security
+- **Enhanced Observability**: Health checks, readiness endpoints, and structured logging
 
 ## 📊 Model Performance
 
@@ -36,9 +39,7 @@ cd powercast-deployment
 pip install -r requirements.txt
 
 # Start the development server
-python app.py
-# or
-uvicorn app:app --reload --port 8000
+uvicorn app_core.main:app --reload --port 8000
 ```
 
 ### Access the Application
@@ -46,6 +47,7 @@ uvicorn app:app --reload --port 8000
 - **Advanced Dashboard**: http://localhost:8000/dashboard
 - **Simple UI**: http://localhost:8000/
 - **Health Check**: http://localhost:8000/health
+- **Readiness Check**: http://localhost:8000/ready
 
 ## 🐳 Docker Deployment
 
@@ -54,12 +56,29 @@ uvicorn app:app --reload --port 8000
 # Build Docker image
 docker build -t powercast-api .
 
-# Run container
-docker run -p 8000:8000 powercast-api
+# Run container (bind to PORT)
+docker run -e PORT=8080 -p 8080:8080 powercast-api
 
 # Or using docker-compose
 docker-compose up --build
 ```
+
+## ☁️ Railway Deployment (Docker)
+
+Deploy using the Dockerfile to ensure correct $PORT binding and health checks.
+
+- Set service to deploy from Dockerfile
+- Configure Environment Variables:
+  - `WORKERS=1` (or 2 for larger plans)
+  - `ALLOWED_ORIGINS=https://your-frontend.app,http://localhost:3000`
+  - `EVALUATE_ON_STARTUP=false` (recommended on small instances)
+  - `LOG_FORMAT=plain` (or `json`)
+
+Health paths:
+- Liveness: `/health`
+- Readiness: `/ready`
+
+Logs show gunicorn bound to `$PORT` automatically.
 
 ## ☁️ Render.com Deployment
 
@@ -71,14 +90,14 @@ docker-compose up --build
 
 2. **Configuration**:
    - **Build Command**: `pip install -r requirements.txt`
-   - **Start Command**: `gunicorn app:app --workers 2 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT --timeout 120`
+   - **Start Command**: `gunicorn app_core.main:app --workers 2 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT --timeout 120`
    - **Environment**: Python 3.10
 
 3. **Environment Variables** (Optional):
    - `PYTHON_VERSION`: 3.10.12
    - `PORT`: 8000 (automatically set by Render)
 
-4. **Health Check Path**: `/health`
+4. **Health Check Path**: `/health` (optionally use `/ready` for readiness)
 
 ### Alternative: YAML Configuration
 Use the included `render.yaml` for infrastructure-as-code deployment:
@@ -86,17 +105,56 @@ Use the included `render.yaml` for infrastructure-as-code deployment:
 render deploy
 ```
 
+## ⚙️ Environment Configuration
+
+The application supports several environment variables for production optimization:
+
+### Core Environment Variables
+
+- **`PORT`**: Port to bind to (default: 8000, auto-set by cloud providers)
+- **`WORKERS`**: Number of Gunicorn workers (default: 2)
+- **`ALLOWED_ORIGINS`**: CORS origins, comma-separated (default: localhost)
+
+### Feature Flags
+
+- **`EVALUATE_ON_STARTUP`**: Compute validation metrics on startup (default: false)
+  - Set to `true` for detailed model metrics, `false` for faster cold starts
+- **`USE_ONNX`**: Use ONNX runtime instead of PyTorch (default: false)
+  - Future optimization for smaller memory footprint
+- **`DEBUG`**: Enable debug features like input echoing (default: false)
+- **`LOG_FORMAT`**: Logging format - `json` or `plain` (default: plain)
+- **`ENABLE_METRICS`**: Enable Prometheus metrics endpoint (default: false)
+
+### Production Recommendations
+
+For Railway/Render deployment:
+```bash
+WORKERS=1                    # Start with 1 worker on small instances
+EVALUATE_ON_STARTUP=false    # Skip validation for faster startup
+ALLOWED_ORIGINS=https://your-domain.com
+LOG_FORMAT=json             # Structured logging for production
+```
+
+For development:
+```bash
+DEBUG=true                   # Enable input echoing and verbose logging
+EVALUATE_ON_STARTUP=true     # Show model performance metrics
+LOG_FORMAT=plain            # Human-readable logs
+```
+
 ## 📡 API Endpoints
 
 ### Core Prediction Endpoints
 
-- `POST /predict` - Custom feature prediction
-- `POST /predict-demo` - Quick prediction with dummy data
-- `GET /generate-dummy-data` - Generate sample input data
+- `POST /predict` - Custom feature prediction with enhanced validation
+- `POST /visualize-input` - Generate visualizations for input data
+- `GET /dummy-data` - Generate sample input data for testing
+- `POST /dummy-data/scenario` - Set simulation scenario
 
 ### Information Endpoints
 
 - `GET /health` - Service health status
+- `GET /ready` - Service readiness status (model loaded)
 - `GET /model-info` - Model architecture and performance metrics
 - `GET /` - Basic web UI
 - `GET /dashboard` - Advanced interactive dashboard
@@ -106,10 +164,11 @@ render deploy
 ```python
 import requests
 
-# Custom prediction
+# Custom prediction with enhanced security controls
 response = requests.post("https://your-app.onrender.com/predict", json={
     "features": [[25.5, 60.2, 3.1, 0.8, 0.6, 0.5, 0.87, -0.71, 0.71, 0.0, 1.0]] * 36,
-    "normalize": True
+    "normalize": True,
+    "echo_input": False  # Security: don't echo input data back
 })
 
 prediction = response.json()
@@ -169,22 +228,89 @@ fetch('/predict-demo', { method: 'POST' })
 - **Monitoring**: Health checks and logging
 - **Error Handling**: Comprehensive error responses
 - **Input Validation**: Pydantic models for request validation
-- **CORS**: Configured for cross-origin requests
+- **CORS**: Controlled via `ALLOWED_ORIGINS` env (comma-separated)
+- **Feature Flags**:
+  - `EVALUATE_ON_STARTUP` (default: false) – compute validation metrics on boot
+  - `USE_ONNX` (default: false) – reserve for ONNX runtime path (future)
+  - `LOG_FORMAT` (plain|json) – structured logs
+  - `WORKERS` – gunicorn worker count
+
+## 🧪 Testing
+
+The application includes comprehensive test coverage:
+
+```bash
+# Install development dependencies
+pip install -r requirements-dev.txt
+
+# Run all tests
+pytest
+
+# Run specific test files
+pytest tests/test_health.py
+pytest tests/test_predict_shape.py
+pytest tests/test_inference_scaling.py
+
+# Run with coverage
+pytest --cov=app_core tests/
+```
+
+### Test Coverage
+- **Health & Readiness**: Service availability and model loading
+- **Prediction Validation**: Input shape and value validation
+- **Security Controls**: Input echo controls and validation
+- **Inference Logic**: Model prediction and scaling
+- **Configuration**: Environment variable handling
+- **Simulation**: Dummy data generation and scenarios
+
+## 🏗️ Architecture
+
+The application uses a modular architecture for maintainability:
+
+```
+app_core/
+├── main.py           # FastAPI application and startup
+├── config.py         # Environment configuration and logging
+├── routes.py         # API route handlers
+├── schemas.py        # Pydantic models and validation
+├── inference.py      # Model loading and prediction logic
+├── simulation.py     # Dummy data generation and state management
+├── visualization.py  # Chart and plot generation
+└── observability.py  # Health checks and monitoring
+```
+
+### Key Design Principles
+- **Separation of Concerns**: Each module has a single responsibility
+- **Environment-Driven**: All behavior controllable via environment variables
+- **Security by Default**: Input echoing disabled, CORS restricted, validation enforced
+- **Observability**: Comprehensive logging, health checks, and metrics
+- **Testing**: Full test coverage with mocked dependencies
 
 ## 🛠️ Development Commands
 
 ```bash
 # Run development server with auto-reload
-uvicorn app:app --reload --host 0.0.0.0 --port 8000
+uvicorn app_core.main:app --reload --host 0.0.0.0 --port 8000
 
 # Test API endpoints
-curl -X POST "http://localhost:8000/predict-demo"
+curl -X GET "http://localhost:8000/dummy-data"
+curl -X GET "http://localhost:8000/health"
 
 # View API documentation
 open http://localhost:8000/docs
 
 # Check health
 curl http://localhost:8000/health
+
+## ✅ Testing
+
+Install dev dependencies and run tests locally:
+
+```bash
+pip install -r requirements.txt
+pip install -r requirements-dev.txt
+pytest -q
+```
 ```
 
 ## 📁 Project Structure

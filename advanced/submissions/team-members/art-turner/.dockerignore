@@ -41,9 +41,17 @@ Thumbs.db
 mlruns/
 outputs/
 *.csv
+*.npy
+*.pth
+!best_attentionlstm_*.pth
 
 # Keep only essential model files
 !*.pkl
 !*.json
 !advanced_models.py
 !week2_feature_engineering_fixed.py
+!app.py
+!model_loader.py
+!app_core/
+!templates/
+!static/
