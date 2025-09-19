@@ -63,9 +63,23 @@ setup_prometheus_metrics(app, enable_metrics)
 
 @app.on_event("startup")
 async def startup_event():
-    """Initialize the application"""
+    """Initialize the application with non-blocking model loading"""
+    global ready
+    logger.info("Starting application...")
+
+    # Start model loading in background
+    import asyncio
+    asyncio.create_task(load_model_background())
+
+    logger.info("Application started; model loading in background")
+
+
+async def load_model_background():
+    """Load model and scalers in background"""
     global ready
     try:
+        logger.info("Background model loading started...")
+
         # Load model and scalers
         load_model_and_scalers()
 
@@ -81,13 +95,13 @@ async def startup_event():
 
         ready = True
         update_ready_status(True)
-        logger.info("Startup complete; readiness set to True")
+        logger.info("Background model loading complete; readiness set to True")
 
     except Exception as e:
         ready = False
         update_ready_status(False)
-        logger.error(f"Startup failed: {e}")
-        raise
+        logger.error(f"Background model loading failed: {e}")
+        # Don't raise here - let the app continue running
 
 
 # Update ready status in observability module
