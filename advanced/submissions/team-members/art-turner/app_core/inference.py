@@ -71,8 +71,9 @@ def load_model_and_scalers():
 
     # Load model checkpoint
     try:
-        model_path = "best_attentionlstm_epoch_72_val_loss_0.0125.pth"
-        model = load_model_from_checkpoint(model_path)
+        import os
+        model_path = os.getenv("MODEL_PATH", "best_attentionlstm_20250907-091842.pth")
+        model, checkpoint = load_model_from_checkpoint(model_path, input_size=11, output_size=3, device='cpu')
         logger.info(f"Model loaded successfully from {model_path}")
     except Exception as e:
         logger.error(f"Failed to load model: {e}")
