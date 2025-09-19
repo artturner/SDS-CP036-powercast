@@ -55,6 +55,18 @@ async def root():
     """
 
 
+@api_router.get("/ping")
+async def ping():
+    """Simple ping endpoint for basic connectivity test"""
+    return {"status": "pong", "timestamp": datetime.now().isoformat()}
+
+
+@api_router.get("/health-simple")
+async def simple_health():
+    """Simple health check that doesn't depend on model loading"""
+    return {"status": "healthy", "timestamp": datetime.now().isoformat()}
+
+
 @api_router.get("/health", response_model=HealthResponse)
 async def health_endpoint():
     """Health check endpoint"""
