@@ -70,12 +70,26 @@ def load_model_and_scalers():
 
     logger.info("Loading model and scalers...")
 
-    # Load model checkpoint
+    # Load metadata first to determine correct input size
+    try:
+        with open('dataset_metadata_fixed.json', 'r') as f:
+            metadata = json.load(f)
+        logger.info("Dataset metadata loaded successfully")
+    except Exception as e:
+        logger.error(f"Failed to load metadata: {e}")
+        raise
+
+    # Load model checkpoint with correct input size
     try:
         import os
         model_path = os.getenv("MODEL_PATH", "best_attentionlstm_20250907-091842.pth")
-        model, checkpoint = load_model_from_checkpoint(model_path, input_size=11, output_size=3, device='cpu')
-        logger.info(f"Model loaded successfully from {model_path}")
+
+        # Use feature_cols (14 features) instead of base_feature_cols (11 features)
+        input_size = len(metadata["feature_cols"])  # 14 features including autoregressive
+        output_size = len(metadata["target_cols"])  # 3 outputs
+
+        model, checkpoint = load_model_from_checkpoint(model_path, input_size=input_size, output_size=output_size, device='cpu')
+        logger.info(f"Model loaded successfully from {model_path} with {input_size} input features")
     except Exception as e:
         logger.error(f"Failed to load model: {e}")
         raise
@@ -98,14 +112,6 @@ def load_model_and_scalers():
         logger.error(f"Failed to load target scaler: {e}")
         raise
 
-    # Load metadata
-    try:
-        with open('dataset_metadata_fixed.json', 'r') as f:
-            metadata = json.load(f)
-        logger.info("Dataset metadata loaded successfully")
-    except Exception as e:
-        logger.error(f"Failed to load metadata: {e}")
-        raise
 
 
 def compute_validation_metrics(batch_size: int = 256, max_samples: Optional[int] = None):
