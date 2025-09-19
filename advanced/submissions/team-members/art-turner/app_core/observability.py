@@ -8,7 +8,7 @@ from typing import Dict, Any, Optional
 from fastapi import HTTPException
 
 from .schemas import HealthResponse
-from .inference import model
+from . import inference
 
 # Global ready state - will be set by main.py
 ready = False
@@ -19,15 +19,15 @@ logger = logging.getLogger(__name__)
 def health_check() -> HealthResponse:
     """Health check endpoint logic."""
     return HealthResponse(
-        status="healthy" if model is not None else "unhealthy",
-        model_loaded=model is not None,
+        status="healthy" if inference.model is not None else "unhealthy",
+        model_loaded=inference.model is not None,
         timestamp=datetime.now().isoformat()
     )
 
 
 def readiness_check() -> Dict[str, Any]:
     """Readiness endpoint logic - returns 200 if ready, 503 if not."""
-    if ready and model is not None:
+    if ready and inference.model is not None:
         return {
             "status": "ready",
             "model_loaded": True,
