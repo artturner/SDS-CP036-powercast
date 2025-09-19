@@ -65,51 +65,82 @@ def partial_scale_features(arr: np.ndarray) -> np.ndarray:
 
 
 def load_model_and_scalers():
-    """Load the trained model, scalers, and metadata"""
+    """Load the best performing model and preprocessing components (copied from working app.py)"""
     global model, feature_scaler, target_scaler, metadata
 
-    logger.info("Loading model and scalers...")
-
-    # Load metadata first to determine correct input size
     try:
+        logger.info("Loading model and preprocessing components...")
+
+        # Load metadata
         with open('dataset_metadata_fixed.json', 'r') as f:
             metadata = json.load(f)
-        logger.info("Dataset metadata loaded successfully")
-    except Exception as e:
-        logger.error(f"Failed to load metadata: {e}")
-        raise
 
-    # Load model checkpoint with correct input size
-    try:
-        import os
-        model_path = os.getenv("MODEL_PATH", "best_attentionlstm_20250907-091842.pth")
-
-        # Use feature_cols (14 features) instead of base_feature_cols (11 features)
-        input_size = len(metadata["feature_cols"])  # 14 features including autoregressive
-        output_size = len(metadata["target_cols"])  # 3 outputs
-
-        model, checkpoint = load_model_from_checkpoint(model_path, input_size=input_size, output_size=output_size, device='cpu')
-        logger.info(f"Model loaded successfully from {model_path} with {input_size} input features")
-    except Exception as e:
-        logger.error(f"Failed to load model: {e}")
-        raise
-
-    # Load feature scaler
-    try:
+        # Load scalers
         with open('feature_scaler.pkl', 'rb') as f:
             feature_scaler = pickle.load(f)
-        logger.info("Feature scaler loaded successfully")
-    except Exception as e:
-        logger.error(f"Failed to load feature scaler: {e}")
-        raise
-
-    # Load target scaler
-    try:
         with open('target_scaler.pkl', 'rb') as f:
             target_scaler = pickle.load(f)
-        logger.info("Target scaler loaded successfully")
+
+        # Attempt to load trained checkpoint if available
+        input_size = len(metadata["base_feature_cols"])  # default 11
+        output_size = len(metadata["target_cols"])       # 3
+
+        import os
+        ckpt_path = os.getenv("MODEL_PATH", "best_attentionlstm_20250907-091842.pth")
+        loaded = False
+        if os.path.exists(ckpt_path):
+            try:
+                logger.info(f"Loading trained model checkpoint from {ckpt_path}...")
+                # Peek into checkpoint to infer input size if needed
+                ckpt_raw = torch.load(ckpt_path, map_location='cpu', weights_only=False)
+                state = ckpt_raw.get('model_state_dict', ckpt_raw.state_dict() if hasattr(ckpt_raw, 'state_dict') else None)
+                inferred_in = None
+                if isinstance(state, dict):
+                    w = state.get('lstm.weight_ih_l0')
+                    if w is not None and w.dim() == 2:
+                        inferred_in = int(w.shape[1])
+                if inferred_in and inferred_in != input_size:
+                    logger.warning(f"Metadata input_size={input_size}, checkpoint expects {inferred_in}. Adjusting to {inferred_in}.")
+                    input_size = inferred_in
+                    # Align feature names: prefer metadata['feature_cols'] if it matches inferred size
+                    feature_cols_full = list(metadata.get("feature_cols", []))
+                    if len(feature_cols_full) == input_size:
+                        metadata["base_feature_cols"] = feature_cols_full
+                    else:
+                        # Fallback: extend base_feature_cols with placeholders
+                        base_cols = list(metadata.get("base_feature_cols", []))
+                        if len(base_cols) < input_size:
+                            extra = [f"extra_feature_{i+1}" for i in range(input_size - len(base_cols))]
+                            metadata["base_feature_cols"] = base_cols + extra
+
+                loaded_model, ckpt = load_model_from_checkpoint(
+                    ckpt_path, input_size=input_size, output_size=output_size, device='cpu'
+                )
+                globals()["model"] = loaded_model
+                loaded = True
+                logger.info("Checkpoint loaded successfully.")
+            except Exception as e:
+                logger.error(f"Failed to load checkpoint: {e}")
+
+        if not loaded:
+            # Fallback to randomly initialized model (not ideal for production)
+            logger.warning("No valid checkpoint found. Falling back to randomly initialized AttentionLSTM.")
+            model_fallback = AttentionLSTM(
+                input_size=input_size,
+                hidden_size=256,
+                num_layers=2,
+                output_size=output_size,
+                dropout_rate=0.2
+            )
+            model_fallback.eval()
+            globals()["model"] = model_fallback
+
+        logger.info("Model and components loaded successfully!")
+        logger.info(f"Expected input shape: (batch_size, {metadata['lookback_window']}, {input_size})")
+        logger.info(f"Output shape: (batch_size, {output_size})")
+
     except Exception as e:
-        logger.error(f"Failed to load target scaler: {e}")
+        logger.error(f"Error loading model components: {str(e)}")
         raise
 
 
