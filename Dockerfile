@@ -40,5 +40,5 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
   CMD python -c "import os,urllib.request,sys; urllib.request.urlopen(f'http://127.0.0.1:{os.environ.get(\"PORT\",\"8000\")}/health-simple'); sys.exit(0)" || exit 1
 
-# Run the application honoring $PORT and configurable workers - TEST WITH MINIMAL APP
-CMD ["sh","-c","exec gunicorn minimal_app:app --workers ${WORKERS:-2} --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:${PORT:-8000} --timeout 120 --access-logfile - --log-level info"]
+# Run the modular FastAPI application using gunicorn
+CMD ["sh", "-c", "exec gunicorn app_core.main:app --workers ${WORKERS:-2} --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:${PORT:-8000} --timeout 120 --access-logfile - --log-level info"]
