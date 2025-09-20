@@ -649,7 +649,7 @@ async def predict(request: PredictionRequest):
 
         # Enhanced input validation
         if inference.metadata is not None:
-            expected_shape = (inference.metadata.get('lookback_window', 36), len(inference.metadata.get('feature_names', [])))
+            expected_shape = (inference.metadata.get('lookback_window', 36), len(inference.metadata.get('base_feature_cols', [])))
             if features.shape != expected_shape:
                 raise HTTPException(
                     status_code=400,
@@ -726,7 +726,7 @@ async def get_dummy_data():
         return {
             "data": data,
             "simulation_state": state,
-            "feature_names": inference.metadata.get('feature_names', []) if inference.metadata else [],
+            "feature_names": inference.metadata.get('base_feature_cols', []) if inference.metadata else [],
             "shape": [len(data), len(data[0]) if data else 0]
         }
     except Exception as e:
@@ -755,7 +755,7 @@ async def set_dummy_scenario(scenario_data: Dict[str, str]):
 async def visualize_input_data(request: PredictionRequest):
     """Create visualizations for input data"""
     try:
-        feature_names = inference.metadata.get('feature_names', []) if inference.metadata else []
+        feature_names = inference.metadata.get('base_feature_cols', []) if inference.metadata else []
         if not feature_names:
             feature_names = [f"Feature_{i}" for i in range(len(request.features[0]))]
 
@@ -825,7 +825,7 @@ async def dashboard(request: Request):
 async def predict_page(request: Request):
     """Prediction interface page"""
     try:
-        feature_names = inference.metadata.get('feature_names', []) if inference.metadata else []
+        feature_names = inference.metadata.get('base_feature_cols', []) if inference.metadata else []
         return templates.TemplateResponse("predict.html", {
             "request": request,
             "model_loaded": inference.model is not None,

@@ -330,16 +330,25 @@ def get_model_info() -> Dict[str, Any]:
     # Count model parameters
     param_count = sum(p.numel() for p in model.parameters())
 
-    # Get validation metrics if available
-    best_performance = model_validation_metrics or {'r2': 0.0, 'rmse': float('inf')}
+    # Get validation metrics if available - ensure JSON serializable values
+    best_performance = model_validation_metrics or {'r2': 0.0, 'rmse': 999999.0}
+
+    # Ensure all float values are JSON serializable
+    if best_performance:
+        for key, value in best_performance.items():
+            if isinstance(value, float):
+                if not isinstance(value, (int, float)) or value != value:  # Check for NaN
+                    best_performance[key] = 0.0
+                elif value == float('inf') or value == float('-inf'):
+                    best_performance[key] = 999999.0 if value > 0 else -999999.0
 
     return {
         'model_type': 'AttentionLSTM',
         'architecture': 'LSTM with Attention Mechanism',
-        'input_features': len(metadata.get('feature_names', [])),
-        'output_targets': len(metadata.get('target_names', [])),
+        'input_features': len(metadata.get('base_feature_cols', [])),  # Use base_feature_cols like working app.py
+        'output_targets': len(metadata.get('target_cols', [])),       # Use target_cols like working app.py
         'model_parameters': param_count,
         'best_performance': best_performance,
-        'feature_names': metadata.get('feature_names', []),
-        'target_names': metadata.get('target_names', [])
+        'feature_names': metadata.get('base_feature_cols', []),       # Use base_feature_cols like working app.py
+        'target_names': metadata.get('target_names', ['Zone_1', 'Zone_2', 'Zone_3'])
     }
