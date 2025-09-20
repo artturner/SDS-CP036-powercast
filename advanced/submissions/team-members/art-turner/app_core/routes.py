@@ -14,10 +14,7 @@ from .schemas import (
     PredictionRequest, PredictionResponse, ModelInfo,
     HealthResponse, InputVisualization
 )
-from .inference import (
-    model, metadata, make_prediction, get_model_info,
-    model_validation_metrics
-)
+from . import inference
 from .simulation import (
     get_dummy_time_series, update_simulation_state,
     get_current_simulation_state, set_simulation_scenario
@@ -630,11 +627,11 @@ async def readiness_endpoint():
 @api_router.get("/model-info", response_model=ModelInfo)
 async def get_model_info_endpoint():
     """Get model information and architecture details"""
-    if model is None or metadata is None:
+    if inference.model is None or inference.metadata is None:
         raise HTTPException(status_code=503, detail="Model not loaded")
 
     try:
-        return get_model_info()
+        return inference.get_model_info()
     except Exception as e:
         logger.error(f"Failed to get model info: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -643,7 +640,7 @@ async def get_model_info_endpoint():
 @api_router.post("/predict", response_model=PredictionResponse)
 async def predict(request: PredictionRequest):
     """Make power consumption predictions"""
-    if model is None:
+    if inference.model is None:
         raise HTTPException(status_code=503, detail="Model not loaded")
 
     try:
@@ -651,8 +648,8 @@ async def predict(request: PredictionRequest):
         features = np.array(request.features)
 
         # Enhanced input validation
-        if metadata is not None:
-            expected_shape = (metadata.get('lookback_window', 36), len(metadata.get('feature_names', [])))
+        if inference.metadata is not None:
+            expected_shape = (inference.metadata.get('lookback_window', 36), len(inference.metadata.get('feature_names', [])))
             if features.shape != expected_shape:
                 raise HTTPException(
                     status_code=400,
@@ -685,7 +682,7 @@ async def predict(request: PredictionRequest):
                 )
 
         # Make prediction
-        predictions, model_info = make_prediction(features, request.normalize)
+        predictions, model_info = inference.make_prediction(features, request.normalize)
 
         # Create named zone predictions
         zone_names = model_info.get('target_names', ['Zone_1', 'Zone_2', 'Zone_3'])
@@ -729,7 +726,7 @@ async def get_dummy_data():
         return {
             "data": data,
             "simulation_state": state,
-            "feature_names": metadata.get('feature_names', []) if metadata else [],
+            "feature_names": inference.metadata.get('feature_names', []) if inference.metadata else [],
             "shape": [len(data), len(data[0]) if data else 0]
         }
     except Exception as e:
@@ -758,7 +755,7 @@ async def set_dummy_scenario(scenario_data: Dict[str, str]):
 async def visualize_input_data(request: PredictionRequest):
     """Create visualizations for input data"""
     try:
-        feature_names = metadata.get('feature_names', []) if metadata else []
+        feature_names = inference.metadata.get('feature_names', []) if inference.metadata else []
         if not feature_names:
             feature_names = [f"Feature_{i}" for i in range(len(request.features[0]))]
 
@@ -790,15 +787,15 @@ async def dashboard(request: Request):
         dummy_data = get_dummy_time_series()
 
         # Get model validation metrics
-        validation_metrics = model_validation_metrics or {}
+        validation_metrics = inference.model_validation_metrics or {}
 
         # Create sample prediction with dummy data
         sample_prediction = None
         gauge_charts_html = ""
-        if model is not None and dummy_data:
+        if inference.model is not None and dummy_data:
             try:
-                predictions, _ = make_prediction(np.array(dummy_data))
-                zone_names = metadata.get('target_names', ['Zone_1', 'Zone_2', 'Zone_3']) if metadata else ['Zone_1', 'Zone_2', 'Zone_3']
+                predictions, _ = inference.make_prediction(np.array(dummy_data))
+                zone_names = inference.metadata.get('target_names', ['Zone_1', 'Zone_2', 'Zone_3']) if inference.metadata else ['Zone_1', 'Zone_2', 'Zone_3']
                 sample_prediction = {
                     zone_names[i]: float(predictions[i])
                     for i in range(min(len(predictions), len(zone_names)))
@@ -809,7 +806,7 @@ async def dashboard(request: Request):
 
         return templates.TemplateResponse("dashboard.html", {
             "request": request,
-            "model_loaded": model is not None,
+            "model_loaded": inference.model is not None,
             "simulation_state": sim_state,
             "validation_metrics": validation_metrics,
             "sample_prediction": sample_prediction,
@@ -828,10 +825,10 @@ async def dashboard(request: Request):
 async def predict_page(request: Request):
     """Prediction interface page"""
     try:
-        feature_names = metadata.get('feature_names', []) if metadata else []
+        feature_names = inference.metadata.get('feature_names', []) if inference.metadata else []
         return templates.TemplateResponse("predict.html", {
             "request": request,
-            "model_loaded": model is not None,
+            "model_loaded": inference.model is not None,
             "feature_names": feature_names
         })
     except Exception as e:
@@ -851,12 +848,12 @@ async def predict_form_handler(request: Request, background_tasks: BackgroundTas
         # Extract features from form (simplified version)
         # In a real implementation, you'd parse all the feature fields
         dummy_data = get_dummy_time_series()
-        predictions, model_info = make_prediction(np.array(dummy_data))
+        predictions, model_info = inference.make_prediction(np.array(dummy_data))
 
         # Update simulation in background
         background_tasks.add_task(update_simulation_state, advance_time=False)
 
-        zone_names = metadata.get('target_names', ['Zone_1', 'Zone_2', 'Zone_3']) if metadata else ['Zone_1', 'Zone_2', 'Zone_3']
+        zone_names = inference.metadata.get('target_names', ['Zone_1', 'Zone_2', 'Zone_3']) if inference.metadata else ['Zone_1', 'Zone_2', 'Zone_3']
         zone_predictions = {
             zone_names[i]: float(predictions[i])
             for i in range(min(len(predictions), len(zone_names)))
