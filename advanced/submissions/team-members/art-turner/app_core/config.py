@@ -10,6 +10,7 @@ EVALUATE_ON_STARTUP = os.getenv("EVALUATE_ON_STARTUP", "false").lower() == "true
 USE_ONNX = os.getenv("USE_ONNX", "false").lower() == "true"
 DEBUG_MODE = os.getenv("DEBUG", "false").lower() == "true"
 LOG_FORMAT = os.getenv("LOG_FORMAT", "plain").lower()
+METEOSOURCE_API_KEY = os.getenv("METEOSOURCE_API_KEY", "f40thajztjajc5cx7erjwyb0azr960d5dzgaksh2")
 
 _origins_env = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:8000")
 ALLOWED_ORIGINS: List[str] = [o.strip() for o in _origins_env.split(',') if o.strip()]

@@ -3,12 +3,13 @@ API route handlers for the Powercast application.
 """
 
 import logging
-from datetime import datetime
-from typing import Dict, Any
+from datetime import datetime, timedelta
+from typing import Dict, Any, Optional
 from fastapi import APIRouter, HTTPException, Request, BackgroundTasks
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 import numpy as np
+import httpx
 
 from .schemas import (
     PredictionRequest, PredictionResponse, ModelInfo,
@@ -24,7 +25,7 @@ from .visualization import (
     create_correlation_heatmap, create_prediction_gauge_charts
 )
 from .observability import health_check, readiness_check
-from .config import DEBUG_MODE
+from .config import DEBUG_MODE, METEOSOURCE_API_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,11 @@ templates = Jinja2Templates(directory="templates")
 
 # Create API router
 api_router = APIRouter()
+
+# Simple in-memory cache for weather data (respects rate limits)
+weather_cache: Optional[Dict] = None
+weather_cache_timestamp: Optional[datetime] = None
+WEATHER_CACHE_DURATION = timedelta(hours=1)  # Cache for 1 hour to respect rate limits
 
 
 @api_router.get("/", response_class=HTMLResponse)
@@ -254,6 +260,58 @@ async def root():
             margin-top: 0.25rem;
         }
 
+        .forecast-day {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0.75rem 0;
+            border-bottom: 1px solid #f1f3f4;
+        }
+
+        .forecast-day:last-child {
+            border-bottom: none;
+        }
+
+        .forecast-date {
+            flex: 1;
+            font-weight: 500;
+            font-size: 0.875rem;
+            color: #495057;
+        }
+
+        .forecast-weather {
+            flex: 2;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .weather-icon {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            font-size: 0.75rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .weather-icon.sunny { background: #f39c12; color: white; }
+        .weather-icon.cloudy { background: #95a5a6; color: white; }
+        .weather-icon.rainy { background: #3498db; color: white; }
+
+        .weather-desc {
+            font-size: 0.8rem;
+            color: #6c757d;
+        }
+
+        .forecast-temp {
+            flex: 1;
+            text-align: right;
+            font-weight: 600;
+            color: #2c3e50;
+        }
+
         @media (max-width: 768px) {
             .dashboard-grid {
                 grid-template-columns: 1fr;
@@ -373,10 +431,10 @@ async def root():
             <div class="card">
                 <div class="card-header">
                     <div>
-                        <div class="card-title">Forecast Timeline</div>
-                        <div class="card-subtitle">Next 24 Hours</div>
+                        <div class="card-title">7-Day Weather Forecast</div>
+                        <div class="card-subtitle">Tetouan, Morocco</div>
                     </div>
-                    <div class="timestamp">Tetouan, Morocco Climate</div>
+                    <div class="timestamp">Live Weather Data</div>
                 </div>
 
                 <div id="forecast-timeline">
@@ -522,6 +580,88 @@ async def root():
             document.getElementById('solar').textContent = `${Math.round(300 + Math.random() * 400)} W/m²`;
         }
 
+        async function updateForecast() {
+            try {
+                const response = await fetch(`${API_BASE}/weather-forecast`);
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+
+                const data = await response.json();
+                displayForecast(data);
+
+            } catch (error) {
+                console.error('Failed to update forecast:', error);
+                document.getElementById('forecast-timeline').innerHTML =
+                    '<div class="loading">Failed to load forecast data</div>';
+            }
+        }
+
+        function displayForecast(data) {
+            const forecastContainer = document.getElementById('forecast-timeline');
+            const forecast = data.forecast || data;
+
+            if (!forecast || forecast.length === 0) {
+                forecastContainer.innerHTML = '<div class="loading">No forecast data available</div>';
+                return;
+            }
+
+            let html = '';
+            forecast.forEach(day => {
+                const date = new Date(day.date);
+                const formattedDate = date.toLocaleDateString('en-US', {
+                    month: 'short',
+                    day: 'numeric'
+                });
+
+                const weatherClass = getWeatherIconClass(day.weather);
+                const weatherIcon = getWeatherIcon(day.weather);
+
+                html += `
+                    <div class="forecast-day">
+                        <div class="forecast-date">${formattedDate}</div>
+                        <div class="forecast-weather">
+                            <div class="weather-icon ${weatherClass}">${weatherIcon}</div>
+                            <div class="weather-desc">${capitalizeWords(day.weather.replace(/_/g, ' '))}</div>
+                        </div>
+                        <div class="forecast-temp">${Math.round(day.temperature.max)}°/${Math.round(day.temperature.min)}°</div>
+                    </div>
+                `;
+            });
+
+            // Add attribution at the bottom
+            html += `
+                <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #f1f3f4; text-align: center;">
+                    <a href="https://www.meteosource.com" target="_blank"
+                       style="font-size: 0.75rem; color: #6c757d; text-decoration: none;">
+                        Powered by Meteosource
+                    </a>
+                    ${data.cached ? ' <span style="font-size: 0.7rem; color: #28a745;">• Cached</span>' : ''}
+                </div>
+            `;
+
+            forecastContainer.innerHTML = html;
+        }
+
+        function getWeatherIconClass(weather) {
+            if (weather.includes('sunny') || weather.includes('clear')) return 'sunny';
+            if (weather.includes('rain') || weather.includes('shower')) return 'rainy';
+            return 'cloudy';
+        }
+
+        function getWeatherIcon(weather) {
+            if (weather.includes('sunny') || weather.includes('clear')) return '☀';
+            if (weather.includes('rain') || weather.includes('shower')) return '🌧';
+            if (weather.includes('cloud')) return '☁';
+            return '☀';
+        }
+
+        function capitalizeWords(str) {
+            return str.split(' ').map(word =>
+                word.charAt(0).toUpperCase() + word.slice(1)
+            ).join(' ');
+        }
+
         async function updateSystemStatus() {
             try {
                 const now = new Date();
@@ -576,6 +716,7 @@ async def root():
                 autoUpdateInterval = setInterval(() => {
                     updatePredictions();
                     updateSystemStatus();
+                    // Weather updates less frequently to respect API limits
                 }, 30000); // Update every 30 seconds
 
                 button.textContent = 'Stop Auto-Update';
@@ -588,9 +729,12 @@ async def root():
         async function initDashboard() {
             await updateSystemStatus();
             await updatePredictions();
+            await updateForecast();
 
             // Update status every 60 seconds
             setInterval(updateSystemStatus, 60000);
+            // Update forecast every 2 hours to respect API limits (1 hour cache + buffer)
+            setInterval(updateForecast, 7200000);
         }
 
         // Start dashboard when page loads
@@ -775,6 +919,96 @@ async def visualize_input_data(request: PredictionRequest):
     except Exception as e:
         logger.error(f"Input visualization failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.get("/weather-forecast")
+async def get_weather_forecast():
+    """Get 7-day weather forecast for Tetouan, Morocco with caching to respect API limits"""
+    global weather_cache, weather_cache_timestamp
+
+    try:
+        # Check if we have valid cached data
+        now = datetime.now()
+        if (weather_cache is not None and
+            weather_cache_timestamp is not None and
+            now - weather_cache_timestamp < WEATHER_CACHE_DURATION):
+            logger.info("Returning cached weather data to respect API rate limits")
+            return weather_cache
+
+        # Fetch fresh data from API
+        logger.info("Fetching fresh weather data from Meteosource API")
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(
+                "https://www.meteosource.com/api/v1/free/point",
+                params={
+                    "place_id": "tetouan",
+                    "sections": "daily",
+                    "language": "en",
+                    "units": "auto",
+                    "key": METEOSOURCE_API_KEY
+                },
+                headers={"accept": "application/json"}
+            )
+
+            if response.status_code != 200:
+                # If API fails but we have cached data, return it
+                if weather_cache is not None:
+                    logger.warning(f"API error {response.status_code}, returning cached data")
+                    return weather_cache
+                raise HTTPException(
+                    status_code=response.status_code,
+                    detail=f"Weather API error: {response.text}"
+                )
+
+            weather_data = response.json()
+
+            # Process and clean the data for frontend consumption
+            forecast_data = {
+                "location": "Tetouan, Morocco",
+                "timezone": weather_data.get("timezone", "Africa/Casablanca"),
+                "forecast": [],
+                "cached": False,
+                "attribution": "Powered by Meteosource",
+                "attribution_url": "https://www.meteosource.com"
+            }
+
+            for day_data in weather_data.get("daily", {}).get("data", []):
+                all_day = day_data.get("all_day", {})
+                forecast_data["forecast"].append({
+                    "date": day_data.get("day"),
+                    "weather": day_data.get("weather"),
+                    "icon": day_data.get("icon"),
+                    "summary": day_data.get("summary"),
+                    "temperature": {
+                        "avg": all_day.get("temperature"),
+                        "min": all_day.get("temperature_min"),
+                        "max": all_day.get("temperature_max")
+                    },
+                    "wind": all_day.get("wind", {}),
+                    "cloud_cover": all_day.get("cloud_cover", {}).get("total", 0),
+                    "precipitation": all_day.get("precipitation", {}).get("total", 0)
+                })
+
+            # Cache the result
+            weather_cache = forecast_data.copy()
+            weather_cache["cached"] = True
+            weather_cache_timestamp = now
+
+            return forecast_data
+
+    except httpx.TimeoutException:
+        # Return cached data if available during timeout
+        if weather_cache is not None:
+            logger.warning("API timeout, returning cached weather data")
+            return weather_cache
+        raise HTTPException(status_code=504, detail="Weather service timeout")
+    except Exception as e:
+        logger.error(f"Weather forecast error: {e}")
+        # Return cached data if available during error
+        if weather_cache is not None:
+            logger.warning("API error, returning cached weather data")
+            return weather_cache
+        raise HTTPException(status_code=500, detail="Failed to fetch weather forecast")
 
 
 # HTML/Template routes
