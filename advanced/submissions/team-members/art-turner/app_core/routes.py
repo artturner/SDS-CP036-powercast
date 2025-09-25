@@ -359,7 +359,7 @@ async def root():
 
                 <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #f1f3f4; font-size: 0.75rem; color: #6c757d;">
                     <div>Forecast combines real weather data with AI predictions</div>
-                    <div>Model Accuracy: R² = 0.8234, RMSE = 2,847.5 kW (95% confidence bands)</div>
+                    <div>Model Accuracy: R² = 0.8234, RMSE = 2.85 MW (95% confidence bands)</div>
                 </div>
             </div>
 
@@ -391,35 +391,6 @@ async def root():
                 </div>
             </div>
 
-            <!-- Environmental Conditions Card -->
-            <div class="card">
-                <div class="card-header">
-                    <div>
-                        <div class="card-title">Environmental Conditions</div>
-                        <div class="card-subtitle">Current Weather Inputs</div>
-                    </div>
-                    <div class="timestamp" id="conditions-timestamp">Updated: --:--</div>
-                </div>
-
-                <div class="conditions-grid">
-                    <div class="condition-item">
-                        <div class="condition-value" id="temperature">--°C</div>
-                        <div class="condition-label">Temperature</div>
-                    </div>
-                    <div class="condition-item">
-                        <div class="condition-value" id="humidity">--%</div>
-                        <div class="condition-label">Humidity</div>
-                    </div>
-                    <div class="condition-item">
-                        <div class="condition-value" id="wind-speed">-- m/s</div>
-                        <div class="condition-label">Wind Speed</div>
-                    </div>
-                    <div class="condition-item">
-                        <div class="condition-value" id="solar">-- W/m²</div>
-                        <div class="condition-label">Solar Radiation</div>
-                    </div>
-                </div>
-            </div>
 
             <!-- Forecast Timeline Card -->
             <div class="card">
@@ -510,17 +481,17 @@ async def root():
         function displayForecastChart(forecastData) {
             const ctx = document.getElementById('forecastChart').getContext('2d');
 
-            // Prepare data for Chart.js
+            // Prepare data for Chart.js (convert kW to MW)
             const labels = forecastData.dates.map(date => {
                 const d = new Date(date);
                 return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
             });
 
-            const zone1Data = forecastData.zone1_consumption;
-            const zone2Data = forecastData.zone2_consumption;
-            const zone3Data = forecastData.zone3_consumption;
-            const confidenceUpper = forecastData.confidence_upper;
-            const confidenceLower = forecastData.confidence_lower;
+            const zone1Data = forecastData.zone1_consumption.map(kw => kw / 1000);
+            const zone2Data = forecastData.zone2_consumption.map(kw => kw / 1000);
+            const zone3Data = forecastData.zone3_consumption.map(kw => kw / 1000);
+            const confidenceUpper = forecastData.confidence_upper.map(kw => kw / 1000);
+            const confidenceLower = forecastData.confidence_lower.map(kw => kw / 1000);
 
             // Destroy existing chart
             if (forecastChart) {
@@ -601,7 +572,7 @@ async def root():
                         tooltip: {
                             callbacks: {
                                 label: function(context) {
-                                    return `${context.dataset.label}: ${Math.round(context.parsed.y).toLocaleString()} kW`;
+                                    return `${context.dataset.label}: ${context.parsed.y.toFixed(1)} MW`;
                                 },
                                 footer: function(tooltipItems) {
                                     if (tooltipItems[0] && forecastData.weather_info) {
@@ -618,11 +589,11 @@ async def root():
                             beginAtZero: true,
                             title: {
                                 display: true,
-                                text: 'Power Consumption (kW)'
+                                text: 'Power Consumption (MW)'
                             },
                             ticks: {
                                 callback: function(value) {
-                                    return Math.round(value).toLocaleString() + ' kW';
+                                    return value.toFixed(1) + ' MW';
                                 }
                             }
                         },
@@ -648,17 +619,6 @@ async def root():
                 '<div class="loading" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);">Failed to load forecast data</div>';
         }
 
-        function updateEnvironmentalConditions() {
-            const now = new Date();
-            document.getElementById('conditions-timestamp').textContent =
-                `Updated: ${formatTime(now)}`;
-
-            // Generate realistic demo environmental data
-            document.getElementById('temperature').textContent = `${Math.round(20 + Math.random() * 10)}°C`;
-            document.getElementById('humidity').textContent = `${Math.round(60 + Math.random() * 20)}%`;
-            document.getElementById('wind-speed').textContent = `${(2 + Math.random() * 4).toFixed(1)} m/s`;
-            document.getElementById('solar').textContent = `${Math.round(300 + Math.random() * 400)} W/m²`;
-        }
 
         async function updateForecast() {
             try {
